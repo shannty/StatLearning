@@ -1,0 +1,53 @@
+---
+title: "Ch6Prez"
+output: html_document
+---
+
+This is the code to perform a lasso regression.
+Yes, RMarkdown is the bomb.com.
+
+```{r}
+require(ISLR)
+require(glmnet)
+
+set.seed(100)
+train1 = sample(1:777,500)
+
+y1 = College$Apps
+x1 = model.matrix(Apps~., College)[,-1]
+```
+We set our seed to 100 for reproduciblity. Note that the model.matrix x has had its first column removed. Why? It actually is the intercept, which we do not want to include in our model
+
+```{r}
+lasso.mod1 = glmnet(x1[train1,], y1[train1])
+lasso.mod1
+plot(lasso.mod1, xvar = "lambda", label = TRUE)
+```
+Here, we use the function glmnet, but with an alpha value of 1 (which is the default value, so we do not need to include it). This signifies that we will be using lasso.
+The graph produced shows how our coefficient values change as we alter the log of lambda. Note that when the log of lambda is near 0, the coefficients take on the values they would have in regular least squares regression.
+
+To predict using our test model...
+```{r}
+lasso.pred1 = predict(lasso.mod1, x1[-train1,])
+mse = apply((y1[-train1] - lasso.pred1)^2, 2, mean)
+plot(log(lasso.mod1$lambda), mse, type = "b", xlab = "Log(lambda)")
+```
+This is great. We can visualize just where our mse is the smallest (hint, its when the log of lambda is really low)
+All we need now is to figure out which value of lambda this is, and what the coefficient values are
+```{r}
+best.lambda = lasso.mod1$lambda[order(mse)[1]]
+best.lambda
+coef(lasso.mod1, s = best.lambda)
+```
+Note that not a single value was actually set to zero! In this particular case, it was better to keep all the predictors, but set a bunch of them very close to 0.
+
+To compare the mse we obtained with the base mse, we do the following
+```{r}
+BaseMSE = mean((mean(y1[train1]) - y1[-train1])^2)
+order(mse)[1]
+best.mse = mse[82]
+best.mse
+best.mse / BaseMSE
+```
+First, we calulate the Base MSE. Then, we determine which of the mse's we obtained from our models was the lowest
+Finally, we take a ratio of best.mse to BaseMSE

@@ -1,0 +1,181 @@
+Model Selection
+=================
+
+
+This is an R Markdown Document
+
+
+```{r}
+library(ISLR)
+summary(Hitters)
+```
+There are some missing values here (in the summary line), so we will remove them to make our life easier
+
+```{r}
+Hitters = na.omit(Hitters)
+with(Hitters, sum(is.na(Salary)))
+```
+The code 'na.omit' removes any row that has an NA (a missing value)
+
+the with command allows us to evaluate an expression over an entire dataset
+So, the entire width command says "count the number of Salary values that were NA in Hitters"
+
+
+Best Subset Regression
+-----------------------
+We use the package 'leaps' to evaluate all the best-subset models.
+```{r}
+require(leaps)
+regmod.full = regsubsets(Salary~., data = Hitters)
+summary(regmod.full)
+```
+The summary that this provides shows a table of which predictors were used to in each model (where the model size goes from 1 to 8 by default). A star (*) is placed in the corresponding column to denote that a predictor was used in that model
+
+Now, this was only until size 8. Since we have 19 variables, lets increase up to there
+```{r}
+regmod.full = regsubsets(Salary~., data = Hitters, nvmax = 18)
+regmod.summary = summary(regmod.full)
+names(regmod.summary)
+```
+Again, this is wicked fast
+Now, this actually holds onto all the different values that we will want to look at in order to make a decision for our models (bic, rss, adjr2, etc)
+
+Now, we are going to plot the cp component of the regmod.summary
+Recall that Cp is an estimate of the prediction error, and our plan is to pick the model with the lowest Cp
+```{r}
+plot(regmod.summary$cp, xlab = "Number of variables", ylab = "Cp")
+which.min(regmod.summary$cp)    # 10
+points(10, regmod.summary$cp[10], pch = 20, col = "red")
+```
+We may want to know specifically which model yields this Cp (ie. the optimal model comes from how many coefficients?).
+The which.min command returns the index of the smallest value in a vector
+
+The points command above is used to paint in our selected point
+It reads "at location x=10, y = regmod.summary$cp[10], place a small circle (the pch = 20) and color it red"
+
+Now, the plot we created was of the Cp's of the regmod we created. However, the regmod also has it's own default plot we can view
+
+```{r}
+plot(regmod.full, scale = "Cp")
+```
+Now, what does this mean? Well on the y axis is all the values of Cp we had in regmod.full, with the smallest (5) at the top, and 100 at the bottom. A black square in a particular y value indicates that that varible is in the model that yield that particular Cp
+
+Upon further analysis, we see that the good models (those with low Cp's) there is a relatively stable set of predictors that are in all of these models. For the bad models, we see they either include every variable, or include very few of them
+
+Now, to see just what the values of each coeffient were in our best model (10), we pull out the coefficients
+```{r}
+coef(regmod.full, 10)
+```
+
+Forward Stepwise Selection
+--------------------------
+
+Here, we use the forward stepwise approach, which is 'greedy' in that it grabs the best predictors for each step of the model building
+It has the same command as best subset regression, but we specify method = "forward"
+
+```{r}
+regmod.fwd = regsubsets(Salary~., data = Hitters, nvmax = 19, method = "forward")
+summary(regmod.fwd)
+
+plot(regmod.fwd, scale = "Cp")
+plot(regmod.fwd)
+```
+The last two lines yield the same result, suggesting they are doing the same thing
+
+
+Model Selection Using the Validation Set Approach
+-------------------------------------------------
+Now, let us use a validation and training set to really see how our subset model works out
+2/3 training, 1/3 test
+```{r}
+dim(Hitters)
+set.seed(1)
+train = sample(seq(263), 180, replace = FALSE)
+train
+regmod.fwd = regsubsets(Salary~., data = Hitters[train,], nvmax = 19, method = "forward")
+```
+Now, we will use the 19 models created in regmod.fwd to predict values of of Salary in the Validation set
+Unfortunately, this needs to be done manually, so we will set some vectors to hold the data
+```{r}
+val.errors = rep(NA, 19)
+x.test = model.matrix(Salary~., data = Hitters[-train])
+```
+Here, we will set a vector val.errors to hold the error of each model, and x.test will be a model.matrix holding the validation set 
+```{r}
+#for (i in 1:19) {
+#  coefi = coef(regmod.fwd,id=i)
+#  pred = x.test[,names(coefi)]%*%coefi
+#  val.errors[i] = mean((Hitters$Salary[-train] - pred)^2)
+#}
+```
+The preceeding loop does the following: 1. pulls the coefficients out of a model, i, created in regmod.fwd
+2. makes predictions using only those coefficients in the validation set
+3. stores the MSE in a vector
+
+Lets attempt to write a function to predict in regsubsets!
+Object refers to the subset object we want to predict from, newdata is the data set that will be used, and id is the id of the model
+```{r}
+predict.regsubsets = function (object, newdata, id, ...) {
+  form = as.formula(object$call[(2)])
+  mat = model.matrix(form, newdata)
+  coefi = coef(object, id = id)
+  mat[,names(coefi)]%*%coefi
+}
+```
+which will most probably not work...eh
+
+
+Ridge Regression and Lasso
+--------------------------
+This uses the package 'glmnet', which doesn't use the regular model formula we are used to 
+
+```{r}
+require(glmnet)
+x = model.matrix(Salary~., -1, data = Hitters)
+y = Hitters$Salary
+```
+First, we will fit a ridge-regression model. This is accomplished by calling glmnet with 'alpha=0'
+
+```{r}
+ridge.mod = glmnet(x,y, alpha = 0)
+plot(ridge.mod, xvar = "lambda", label = TRUE)
+```
+The plot created is a function of the log of lambda. Recall that the ridge regression model is penalized by the sum of squares of the coefficients, which is controlled by lambda
+On the very right hand side of the plot (where lambda is 0), we see the values of the coefficents that would have been obtained from an ordinary least squares regression
+
+We can then use the cv.glmnet function to do our cross validation!
+```{r}
+cv.ridge = cv.glmnet(x,y,alpha = 0)
+plot(cv.ridge)
+```
+At the top of the plot, it says 20 a bunch of times. This refers to the number of predictors being used in each model. In this case, 20 predictors are used every time
+
+Now, we will do a lasso!
+
+```{r}
+lasso.mod = glmnet(x, y, alpha = 1)
+plot(lasso.mod, xvar = "lambda", label = TRUE)
+plot(lasso.mod, xvar = "dev", label = TRUE)
+```
+By penalizing the absolute value of coefficients, the lasso actually forces some of the predictor's coefficients to be exactly 0. The top of this plot shows the number of non-zero predictors in the corresponding model of log lambda
+The second plot is essentially a look at the R^2 values, or how much of the variation was explained by our model
+
+Now, we will check out the CV stuff
+```{r}
+cv.lasso = cv.glmnet(x, y, alpha = 1)
+coef(cv.lasso)
+plot(cv.lasso)
+```
+Finally, we will end by performing the validation approach on our lasso model
+
+```{r}
+lasso.tr = glmnet(x[train,], y[train])
+lasso.tr
+```
+
+```{r}
+lasso.pred = predict(lasso.tr, x[-train,])
+dim(lasso.pred)
+MSE = apply((y[-train] - lasso.pred)^2, 2, mean)
+plot(log(lasso.tr$lambda), MSE, type = "b", xlab = "Log(lambda)")
+```
